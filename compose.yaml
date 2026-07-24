@@ -1,0 +1,17 @@
+services:
+  cv-object-detection:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cv-object-detection:latest
+    volumes:
+      - ./:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: ["sleep", "infinity"]
