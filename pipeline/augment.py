@@ -1,5 +1,6 @@
 import json
 import os
+import random
 
 import albumentations
 import cv2
@@ -17,6 +18,12 @@ from pipeline.polygon_mask_conversion import (
 
 MASK_PIXEL_VALUE_FOR_PEDESTRIAN = 255
 
+ImageSplit = tuple[
+    list[CocoImageEntry],
+    list[CocoImageEntry],
+    list[CocoImageEntry],
+]
+
 
 def load_reviewed_dataset(
     coco_path: str,
@@ -30,6 +37,22 @@ def load_reviewed_dataset(
             annotations_by_image_id[image_id] = []
         annotations_by_image_id[image_id].append(annotation)
     return coco_dataset["images"], annotations_by_image_id
+
+
+def split_images_into_train_validation_test(
+    images: list[CocoImageEntry],
+) -> ImageSplit:
+    shuffled_images = list(images)
+    random.Random(config.RANDOM_SEED).shuffle(shuffled_images)
+    total_count = len(shuffled_images)
+    test_count = round(total_count * config.UNET_TEST_FRACTION)
+    validation_count = round(total_count * config.UNET_VALIDATION_FRACTION)
+    test_images = shuffled_images[:test_count]
+    validation_images = shuffled_images[
+        test_count:test_count + validation_count
+    ]
+    training_images = shuffled_images[test_count + validation_count:]
+    return training_images, validation_images, test_images
 
 
 def build_augmentation_pipeline() -> albumentations.Compose:
@@ -86,6 +109,17 @@ def build_augmentation_pipeline() -> albumentations.Compose:
     )
 
 
+def build_eval_pipeline() -> albumentations.Compose:
+    return albumentations.Compose(
+        [
+            albumentations.Resize(
+                height=config.AUGMENTED_IMAGE_HEIGHT,
+                width=config.AUGMENTED_IMAGE_WIDTH,
+            ),
+        ]
+    )
+
+
 def load_image_as_rgb(image_path: str) -> numpy.ndarray:
     image = cv2.imread(image_path)
     return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -96,13 +130,15 @@ def save_augmented_pair(
     mask: numpy.ndarray,
     output_stem: str,
     copy_index: int,
+    images_directory: str,
+    masks_directory: str,
 ) -> None:
     image_output_path = os.path.join(
-        config.AUGMENTED_IMAGES_DIRECTORY,
+        images_directory,
         f"{output_stem}_{copy_index}.png",
     )
     mask_output_path = os.path.join(
-        config.AUGMENTED_MASKS_DIRECTORY,
+        masks_directory,
         f"{output_stem}_{copy_index}.png",
     )
     image_as_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
@@ -117,6 +153,9 @@ def augment_single_image(
     image_entry: CocoImageEntry,
     annotations_by_image_id: AnnotationsByImageId,
     augmentation_pipeline: albumentations.Compose,
+    images_directory: str,
+    masks_directory: str,
+    number_of_copies: int,
 ) -> None:
     image_path = os.path.join(
         config.REVIEWED_IMAGES_DIRECTORY,
@@ -130,30 +169,84 @@ def augment_single_image(
         image_entry["width"],
     )
     output_stem = os.path.splitext(image_entry["file_name"])[0]
-    for copy_index in range(config.AUGMENTED_COPIES_PER_IMAGE):
+    for copy_index in range(number_of_copies):
         augmented = augmentation_pipeline(image=image, mask=mask)
         save_augmented_pair(
             augmented["image"],
             augmented["mask"],
             output_stem,
             copy_index,
+            images_directory,
+            masks_directory,
         )
 
 
-def main() -> None:
-    os.makedirs(config.AUGMENTED_IMAGES_DIRECTORY, exist_ok=True)
-    os.makedirs(config.AUGMENTED_MASKS_DIRECTORY, exist_ok=True)
-    images, annotations_by_image_id = load_reviewed_dataset(
-        config.REVIEWED_COCO_PATH
-    )
-    augmentation_pipeline = build_augmentation_pipeline()
-    for image_entry in images:
-        print(f"Augmenting {image_entry['file_name']}")
+def augment_split(
+    split_name: str,
+    image_entries: list[CocoImageEntry],
+    annotations_by_image_id: AnnotationsByImageId,
+    augmentation_pipeline: albumentations.Compose,
+    images_directory: str,
+    masks_directory: str,
+    number_of_copies: int,
+) -> None:
+    os.makedirs(images_directory, exist_ok=True)
+    os.makedirs(masks_directory, exist_ok=True)
+    for image_entry in image_entries:
+        print(f"Augmenting [{split_name}] {image_entry['file_name']}")
         augment_single_image(
             image_entry,
             annotations_by_image_id,
             augmentation_pipeline,
+            images_directory,
+            masks_directory,
+            number_of_copies,
         )
+
+
+def main() -> None:
+    images, annotations_by_image_id = load_reviewed_dataset(
+        config.REVIEWED_COCO_PATH
+    )
+    training_images, validation_images, test_images = (
+        split_images_into_train_validation_test(images)
+    )
+    print(
+        f"Split {len(images)} reviewed images into "
+        f"{len(training_images)} train / "
+        f"{len(validation_images)} val / "
+        f"{len(test_images)} test, by source image "
+        f"(so augmented copies of one image never cross splits)"
+    )
+    training_pipeline = build_augmentation_pipeline()
+    eval_pipeline = build_eval_pipeline()
+    augment_split(
+        "train",
+        training_images,
+        annotations_by_image_id,
+        training_pipeline,
+        config.AUGMENTED_TRAIN_IMAGES_DIRECTORY,
+        config.AUGMENTED_TRAIN_MASKS_DIRECTORY,
+        config.AUGMENTED_COPIES_PER_IMAGE,
+    )
+    augment_split(
+        "val",
+        validation_images,
+        annotations_by_image_id,
+        eval_pipeline,
+        config.AUGMENTED_VALIDATION_IMAGES_DIRECTORY,
+        config.AUGMENTED_VALIDATION_MASKS_DIRECTORY,
+        1,
+    )
+    augment_split(
+        "test",
+        test_images,
+        annotations_by_image_id,
+        eval_pipeline,
+        config.AUGMENTED_TEST_IMAGES_DIRECTORY,
+        config.AUGMENTED_TEST_MASKS_DIRECTORY,
+        1,
+    )
     print(f"Saved augmented dataset to {config.AUGMENTED_DIRECTORY}")
 
 

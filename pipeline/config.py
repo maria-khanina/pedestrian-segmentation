@@ -7,10 +7,15 @@ REVIEWED_DIRECTORY = "data/reviewed"
 REVIEWED_IMAGES_DIRECTORY = "data/reviewed/images"
 REVIEWED_COCO_PATH = "data/reviewed/annotations/instances_default.json"
 AUGMENTED_DIRECTORY = "data/augmented"
-AUGMENTED_IMAGES_DIRECTORY = "data/augmented/images"
-AUGMENTED_MASKS_DIRECTORY = "data/augmented/masks"
+AUGMENTED_TRAIN_IMAGES_DIRECTORY = "data/augmented/train/images"
+AUGMENTED_TRAIN_MASKS_DIRECTORY = "data/augmented/train/masks"
+AUGMENTED_VALIDATION_IMAGES_DIRECTORY = "data/augmented/val/images"
+AUGMENTED_VALIDATION_MASKS_DIRECTORY = "data/augmented/val/masks"
+AUGMENTED_TEST_IMAGES_DIRECTORY = "data/augmented/test/images"
+AUGMENTED_TEST_MASKS_DIRECTORY = "data/augmented/test/masks"
 CHECKPOINTS_DIRECTORY = "data/checkpoints"
 UNET_CHECKPOINT_PATH = "data/checkpoints/unet_pedestrian.pt"
+PREDICTIONS_DIRECTORY = "data/predictions"
 
 DATASET_DOWNLOAD_URL = (
     "https://www.cis.upenn.edu/~jshi/ped_html/PennFudanPed.zip"
@@ -62,7 +67,13 @@ UNET_BATCH_SIZE = 4
 UNET_LEARNING_RATE = 0.0001
 UNET_NUMBER_OF_EPOCHS = 20
 UNET_VALIDATION_FRACTION = 0.15
+UNET_TEST_FRACTION = 0.15
+UNET_PREDICTION_THRESHOLD = 0.5
+EARLY_STOPPING_PATIENCE_IN_EPOCHS = 5
 RANDOM_SEED = 42
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STANDARD_DEVIATION = (0.229, 0.224, 0.225)
+
+PREDICTION_OVERLAY_COLOR_BGR = (0, 0, 255)
+PREDICTION_OVERLAY_ALPHA = 0.45
