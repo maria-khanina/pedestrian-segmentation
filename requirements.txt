@@ -26,6 +26,7 @@ nvidia-cuda-cupti-cu12==12.1.105
 opencv-python-headless==5.0.0.93
 packaging==26.2
 pillow==12.3.0
+pycocotools==2.0.11
 pydantic==2.13.4
 pydantic-core==2.46.4
 pygments==2.20.0

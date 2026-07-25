@@ -16,6 +16,8 @@ AUGMENTED_TEST_MASKS_DIRECTORY = "data/augmented/test/masks"
 CHECKPOINTS_DIRECTORY = "data/checkpoints"
 UNET_CHECKPOINT_PATH = "data/checkpoints/unet_pedestrian.pt"
 PREDICTIONS_DIRECTORY = "data/predictions"
+LOGS_DIRECTORY = "data/logs"
+PIPELINE_LOG_PATH = "data/logs/pipeline.log"
 
 DATASET_DOWNLOAD_URL = (
     "https://www.cis.upenn.edu/~jshi/ped_html/PennFudanPed.zip"
@@ -71,6 +73,8 @@ UNET_TEST_FRACTION = 0.15
 UNET_PREDICTION_THRESHOLD = 0.5
 EARLY_STOPPING_PATIENCE_IN_EPOCHS = 5
 RANDOM_SEED = 42
+
+CLI_SCRIPT_ARGUMENT_COUNT = 3
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STANDARD_DEVIATION = (0.229, 0.224, 0.225)

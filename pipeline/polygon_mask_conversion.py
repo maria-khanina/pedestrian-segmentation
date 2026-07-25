@@ -38,19 +38,21 @@ def convert_mask_to_polygons(
     return polygons
 
 
-def _polygon_to_point_array(polygon: list[float]) -> numpy.ndarray:
+def convert_polygon_to_point_array(
+    polygon: list[float],
+    point_dtype: numpy.dtype,
+    round_coordinates: bool,
+) -> numpy.ndarray:
     number_of_points = len(polygon) // 2
-    point_array = numpy.zeros(
-        (number_of_points, 2),
-        dtype=numpy.int32,
-    )
+    point_array = numpy.zeros((number_of_points, 2), dtype=point_dtype)
     for point_index in range(number_of_points):
-        point_array[point_index, 0] = round(
-            polygon[point_index * 2]
-        )
-        point_array[point_index, 1] = round(
-            polygon[point_index * 2 + 1]
-        )
+        x_value = polygon[point_index * 2]
+        y_value = polygon[point_index * 2 + 1]
+        if round_coordinates:
+            x_value = round(x_value)
+            y_value = round(y_value)
+        point_array[point_index, 0] = x_value
+        point_array[point_index, 1] = y_value
     return point_array
 
 
@@ -62,6 +64,10 @@ def rasterize_annotations_to_mask(
     mask = numpy.zeros((image_height, image_width), dtype=numpy.uint8)
     for annotation in annotations:
         for polygon in annotation["segmentation"]:
-            point_array = _polygon_to_point_array(polygon)
+            point_array = convert_polygon_to_point_array(
+                polygon,
+                numpy.int32,
+                True,
+            )
             cv2.fillPoly(mask, [point_array], 1)
     return mask

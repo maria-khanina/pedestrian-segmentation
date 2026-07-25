@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import zipfile
@@ -5,9 +6,12 @@ import zipfile
 import requests
 
 from pipeline import config
+from pipeline.logging_setup import configure_logging
+
+_logger = logging.getLogger(__name__)
 
 
-def download_dataset_archive(destination_path: str) -> None:
+def _download_dataset_archive(destination_path: str) -> None:
     response = requests.get(
         config.DATASET_DOWNLOAD_URL,
         stream=True,
@@ -21,7 +25,7 @@ def download_dataset_archive(destination_path: str) -> None:
             archive_file.write(chunk)
 
 
-def extract_dataset_archive(
+def _extract_dataset_archive(
     archive_path: str,
     extraction_directory: str,
 ) -> None:
@@ -29,7 +33,7 @@ def extract_dataset_archive(
         archive_file.extractall(extraction_directory)
 
 
-def move_extracted_images_to_raw_directory(
+def _move_extracted_images_to_raw_directory(
     extraction_directory: str,
     raw_images_directory: str,
 ) -> None:
@@ -45,7 +49,7 @@ def move_extracted_images_to_raw_directory(
         shutil.copyfile(source_path, destination_path)
 
 
-def clean_up_intermediate_files(
+def _clean_up_intermediate_files(
     archive_path: str,
     extraction_directory: str,
 ) -> None:
@@ -58,24 +62,25 @@ def clean_up_intermediate_files(
 
 
 def main() -> None:
+    configure_logging(logging.INFO, config.PIPELINE_LOG_PATH)
     os.makedirs(config.RAW_DIRECTORY, exist_ok=True)
     os.makedirs(config.RAW_IMAGES_DIRECTORY, exist_ok=True)
-    print("Downloading dataset archive...")
-    download_dataset_archive(config.DATASET_ARCHIVE_PATH)
-    print("Extracting archive...")
-    extract_dataset_archive(
+    _logger.info("Downloading dataset archive...")
+    _download_dataset_archive(config.DATASET_ARCHIVE_PATH)
+    _logger.info("Extracting archive...")
+    _extract_dataset_archive(
         config.DATASET_ARCHIVE_PATH,
         config.RAW_DIRECTORY,
     )
-    move_extracted_images_to_raw_directory(
+    _move_extracted_images_to_raw_directory(
         config.RAW_DIRECTORY,
         config.RAW_IMAGES_DIRECTORY,
     )
-    clean_up_intermediate_files(
+    _clean_up_intermediate_files(
         config.DATASET_ARCHIVE_PATH,
         config.RAW_DIRECTORY,
     )
-    print(f"Saved images to {config.RAW_IMAGES_DIRECTORY}")
+    _logger.info(f"Saved images to {config.RAW_IMAGES_DIRECTORY}")
 
 
 if __name__ == "__main__":

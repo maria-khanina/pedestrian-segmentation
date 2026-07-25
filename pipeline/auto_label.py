@@ -1,33 +1,31 @@
+import logging
 import os
 
 import PIL.Image
-import torch
 
 from pipeline import config
 from pipeline.coco_export import CocoDatasetBuilder
 from pipeline.detection import GroundingDinoDetector
+from pipeline.device import select_device
+from pipeline.logging_setup import configure_logging
 from pipeline.polygon_mask_conversion import convert_mask_to_polygons
 from pipeline.segmentation import SamSegmentor
 
-IMAGE_FILE_EXTENSIONS = (".png", ".jpg", ".jpeg")
+_IMAGE_FILE_EXTENSIONS = (".png", ".jpg", ".jpeg")
+
+_logger = logging.getLogger(__name__)
 
 
-def list_image_file_names(directory: str) -> list[str]:
+def _list_image_file_names(directory: str) -> list[str]:
     all_entries = sorted(os.listdir(directory))
     image_file_names: list[str] = []
     for entry in all_entries:
-        if entry.lower().endswith(IMAGE_FILE_EXTENSIONS):
+        if entry.lower().endswith(_IMAGE_FILE_EXTENSIONS):
             image_file_names.append(entry)
     return image_file_names
 
 
-def select_device() -> str:
-    if torch.cuda.is_available():
-        return "cuda"
-    return "cpu"
-
-
-def label_single_image(
+def _label_single_image(
     image_path: str,
     detector: GroundingDinoDetector,
     segmentor: SamSegmentor,
@@ -61,8 +59,9 @@ def label_single_image(
 
 
 def main() -> None:
+    configure_logging(logging.INFO, config.PIPELINE_LOG_PATH)
     device = select_device()
-    print(f"Using device: {device}")
+    _logger.info(f"Using device: {device}")
     detector = GroundingDinoDetector(
         config.GROUNDING_DINO_MODEL_IDENTIFIER,
         device,
@@ -76,11 +75,11 @@ def main() -> None:
         config.PEDESTRIAN_CATEGORY_NAME,
         config.PEDESTRIAN_SUPERCATEGORY_NAME,
     )
-    image_file_names = list_image_file_names(config.RAW_IMAGES_DIRECTORY)
+    image_file_names = _list_image_file_names(config.RAW_IMAGES_DIRECTORY)
     for file_name in image_file_names:
         image_path = os.path.join(config.RAW_IMAGES_DIRECTORY, file_name)
-        print(f"Labeling {file_name}")
-        label_single_image(
+        _logger.info(f"Labeling {file_name}")
+        _label_single_image(
             image_path,
             detector,
             segmentor,
@@ -88,7 +87,9 @@ def main() -> None:
             file_name,
         )
     dataset_builder.save_to_file(config.AUTO_LABELS_COCO_PATH)
-    print(f"Saved COCO annotations to {config.AUTO_LABELS_COCO_PATH}")
+    _logger.info(
+        f"Saved COCO annotations to {config.AUTO_LABELS_COCO_PATH}"
+    )
 
 
 if __name__ == "__main__":

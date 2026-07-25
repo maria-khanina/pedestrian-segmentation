@@ -1,0 +1,386 @@
+import csv
+import logging
+import sys
+from typing import TypedDict
+
+import cv2
+import numpy
+
+from pipeline import config
+from pipeline.coco_io import group_annotations_by_image_id, load_coco_dataset
+from pipeline.coco_types import CocoAnnotationEntry
+from pipeline.logging_setup import configure_logging
+from pipeline.polygon_mask_conversion import convert_polygon_to_point_array
+
+_logger = logging.getLogger(__name__)
+
+_USAGE_MESSAGE = (
+    "Usage: python -m pipeline.annotation_triage "
+    "<input_coco_json_path> <output_csv_path>"
+)
+
+_SIGNAL_NOT_APPLICABLE_FLOAT = -1.0
+_SIGNAL_NOT_APPLICABLE_INT = -1
+
+_SIGNAL_NAME_ANNOTATION_COUNT = "annotation_count"
+_SIGNAL_NAME_MINIMUM_AREA = "minimum_area"
+_SIGNAL_NAME_VERTEX_COUNT = "maximum_vertex_count"
+_SIGNAL_NAME_ASPECT_RATIO = "maximum_aspect_ratio"
+_SIGNAL_NAME_SOLIDITY = "minimum_solidity"
+
+_CSV_HEADER_ROW = [
+    "file_name",
+    "cvat_frame_number",
+    "priority_rank",
+    "worst_signal",
+    "annotation_count",
+    "minimum_area",
+    "maximum_vertex_count",
+    "maximum_aspect_ratio",
+    "minimum_solidity",
+]
+
+
+class _ImageSignalValues(TypedDict):
+    file_name: str
+    annotation_count: int
+    minimum_area: float
+    maximum_vertex_count: int
+    maximum_aspect_ratio: float
+    minimum_solidity: float
+
+
+_SuspicionScores = list[tuple[float, str]]
+_SignalRanks = list[tuple[str, dict[str, int]]]
+
+
+def _compute_polygon_vertex_count(polygon: list[float]) -> int:
+    return len(polygon) // 2
+
+
+def _compute_polygon_solidity(polygon: list[float]) -> float:
+    point_array = convert_polygon_to_point_array(
+        polygon,
+        numpy.float32,
+        False,
+    )
+    polygon_area = cv2.contourArea(point_array)
+    convex_hull_points = cv2.convexHull(point_array)
+    convex_hull_area = cv2.contourArea(convex_hull_points)
+    if convex_hull_area == 0.0:
+        return 0.0
+    return polygon_area / convex_hull_area
+
+
+def _compute_maximum_vertex_count(
+    annotation: CocoAnnotationEntry,
+) -> int:
+    vertex_counts: list[int] = []
+    for polygon in annotation["segmentation"]:
+        vertex_counts.append(_compute_polygon_vertex_count(polygon))
+    return max(vertex_counts)
+
+
+def _compute_minimum_solidity(
+    annotation: CocoAnnotationEntry,
+) -> float:
+    solidities: list[float] = []
+    for polygon in annotation["segmentation"]:
+        solidities.append(_compute_polygon_solidity(polygon))
+    return min(solidities)
+
+
+def _compute_bounding_box_aspect_ratio(
+    annotation: CocoAnnotationEntry,
+) -> float:
+    bounding_box_width = annotation["bbox"][2]
+    bounding_box_height = annotation["bbox"][3]
+    if bounding_box_height == 0.0:
+        return 0.0
+    return bounding_box_width / bounding_box_height
+
+
+def _compute_image_signal_values(
+    file_name: str,
+    annotations: list[CocoAnnotationEntry],
+) -> _ImageSignalValues:
+    annotation_count = len(annotations)
+    if annotation_count == 0:
+        return _ImageSignalValues(
+            file_name=file_name,
+            annotation_count=0,
+            minimum_area=_SIGNAL_NOT_APPLICABLE_FLOAT,
+            maximum_vertex_count=_SIGNAL_NOT_APPLICABLE_INT,
+            maximum_aspect_ratio=_SIGNAL_NOT_APPLICABLE_FLOAT,
+            minimum_solidity=_SIGNAL_NOT_APPLICABLE_FLOAT,
+        )
+    areas: list[float] = []
+    vertex_counts: list[int] = []
+    aspect_ratios: list[float] = []
+    solidities: list[float] = []
+    for annotation in annotations:
+        areas.append(annotation["area"])
+        vertex_counts.append(_compute_maximum_vertex_count(annotation))
+        aspect_ratios.append(
+            _compute_bounding_box_aspect_ratio(annotation)
+        )
+        solidities.append(_compute_minimum_solidity(annotation))
+    return _ImageSignalValues(
+        file_name=file_name,
+        annotation_count=annotation_count,
+        minimum_area=min(areas),
+        maximum_vertex_count=max(vertex_counts),
+        maximum_aspect_ratio=max(aspect_ratios),
+        minimum_solidity=min(solidities),
+    )
+
+
+def _assign_ranks(
+    file_names_sorted_most_suspicious_first: list[str],
+) -> dict[str, int]:
+    ranks: dict[str, int] = {}
+    rank_index = 0
+    while rank_index < len(file_names_sorted_most_suspicious_first):
+        file_name = file_names_sorted_most_suspicious_first[rank_index]
+        ranks[file_name] = rank_index + 1
+        rank_index += 1
+    return ranks
+
+
+def _rank_by_suspicion_scores(
+    suspicion_scores: _SuspicionScores,
+) -> dict[str, int]:
+    sorted_scores = sorted(suspicion_scores, reverse=True)
+    file_names_sorted: list[str] = []
+    for _, file_name in sorted_scores:
+        file_names_sorted.append(file_name)
+    return _assign_ranks(file_names_sorted)
+
+
+def _compute_count_deviation_scores(
+    image_signal_values: list[_ImageSignalValues],
+) -> _SuspicionScores:
+    counts: list[int] = []
+    for values in image_signal_values:
+        counts.append(values["annotation_count"])
+    sorted_counts = sorted(counts)
+    median_count = sorted_counts[len(sorted_counts) // 2]
+    scores: _SuspicionScores = []
+    for values in image_signal_values:
+        deviation = abs(values["annotation_count"] - median_count)
+        scores.append((float(deviation), values["file_name"]))
+    return scores
+
+
+def _compute_minimum_area_scores(
+    image_signal_values: list[_ImageSignalValues],
+) -> _SuspicionScores:
+    scores: _SuspicionScores = []
+    for values in image_signal_values:
+        if values["minimum_area"] == _SIGNAL_NOT_APPLICABLE_FLOAT:
+            continue
+        scores.append((-values["minimum_area"], values["file_name"]))
+    return scores
+
+
+def _compute_vertex_count_extremity_scores(
+    image_signal_values: list[_ImageSignalValues],
+) -> _SuspicionScores:
+    vertex_counts: list[int] = []
+    for values in image_signal_values:
+        if values["maximum_vertex_count"] == _SIGNAL_NOT_APPLICABLE_INT:
+            continue
+        vertex_counts.append(values["maximum_vertex_count"])
+    sorted_vertex_counts = sorted(vertex_counts)
+    median_vertex_count = sorted_vertex_counts[
+        len(sorted_vertex_counts) // 2
+    ]
+    scores: _SuspicionScores = []
+    for values in image_signal_values:
+        if values["maximum_vertex_count"] == _SIGNAL_NOT_APPLICABLE_INT:
+            continue
+        deviation = abs(
+            values["maximum_vertex_count"] - median_vertex_count
+        )
+        scores.append((float(deviation), values["file_name"]))
+    return scores
+
+
+def _compute_maximum_aspect_ratio_scores(
+    image_signal_values: list[_ImageSignalValues],
+) -> _SuspicionScores:
+    scores: _SuspicionScores = []
+    for values in image_signal_values:
+        if values["maximum_aspect_ratio"] == _SIGNAL_NOT_APPLICABLE_FLOAT:
+            continue
+        scores.append(
+            (values["maximum_aspect_ratio"], values["file_name"])
+        )
+    return scores
+
+
+def _compute_minimum_solidity_scores(
+    image_signal_values: list[_ImageSignalValues],
+) -> _SuspicionScores:
+    scores: _SuspicionScores = []
+    for values in image_signal_values:
+        if values["minimum_solidity"] == _SIGNAL_NOT_APPLICABLE_FLOAT:
+            continue
+        scores.append((-values["minimum_solidity"], values["file_name"]))
+    return scores
+
+
+def _compute_all_signal_ranks(
+    image_signal_values: list[_ImageSignalValues],
+) -> _SignalRanks:
+    signal_ranks: _SignalRanks = []
+    signal_ranks.append((
+        _SIGNAL_NAME_ANNOTATION_COUNT,
+        _rank_by_suspicion_scores(
+            _compute_count_deviation_scores(image_signal_values)
+        ),
+    ))
+    signal_ranks.append((
+        _SIGNAL_NAME_MINIMUM_AREA,
+        _rank_by_suspicion_scores(
+            _compute_minimum_area_scores(image_signal_values)
+        ),
+    ))
+    signal_ranks.append((
+        _SIGNAL_NAME_VERTEX_COUNT,
+        _rank_by_suspicion_scores(
+            _compute_vertex_count_extremity_scores(image_signal_values)
+        ),
+    ))
+    signal_ranks.append((
+        _SIGNAL_NAME_ASPECT_RATIO,
+        _rank_by_suspicion_scores(
+            _compute_maximum_aspect_ratio_scores(image_signal_values)
+        ),
+    ))
+    signal_ranks.append((
+        _SIGNAL_NAME_SOLIDITY,
+        _rank_by_suspicion_scores(
+            _compute_minimum_solidity_scores(image_signal_values)
+        ),
+    ))
+    return signal_ranks
+
+
+def _find_worst_rank_and_signal(
+    file_name: str,
+    signal_ranks: _SignalRanks,
+) -> tuple[int, str]:
+    first_signal_name, first_signal_ranks = signal_ranks[0]
+    best_rank_so_far = first_signal_ranks[file_name]
+    best_signal_name = first_signal_name
+    for signal_name, ranks_by_file_name in signal_ranks[1:]:
+        if file_name not in ranks_by_file_name:
+            continue
+        candidate_rank = ranks_by_file_name[file_name]
+        if candidate_rank < best_rank_so_far:
+            best_rank_so_far = candidate_rank
+            best_signal_name = signal_name
+    return best_rank_so_far, best_signal_name
+
+
+def _compute_frame_numbers_by_lexicographic_order(
+    file_names: list[str],
+) -> dict[str, int]:
+    sorted_file_names = sorted(file_names)
+    frame_numbers: dict[str, int] = {}
+    frame_index = 0
+    while frame_index < len(sorted_file_names):
+        frame_numbers[sorted_file_names[frame_index]] = frame_index
+        frame_index += 1
+    return frame_numbers
+
+
+def _format_optional_float_field(value: float) -> str:
+    if value == _SIGNAL_NOT_APPLICABLE_FLOAT:
+        return ""
+    return str(value)
+
+
+def _format_optional_int_field(value: int) -> str:
+    if value == _SIGNAL_NOT_APPLICABLE_INT:
+        return ""
+    return str(value)
+
+
+def _build_csv_row(
+    values: _ImageSignalValues,
+    frame_number: int,
+    priority_rank: int,
+    worst_signal_name: str,
+) -> list[str]:
+    row: list[str] = []
+    row.append(values["file_name"])
+    row.append(str(frame_number))
+    row.append(str(priority_rank))
+    row.append(worst_signal_name)
+    row.append(str(values["annotation_count"]))
+    row.append(_format_optional_float_field(values["minimum_area"]))
+    row.append(_format_optional_int_field(values["maximum_vertex_count"]))
+    row.append(_format_optional_float_field(values["maximum_aspect_ratio"]))
+    row.append(_format_optional_float_field(values["minimum_solidity"]))
+    return row
+
+
+def _write_priority_csv(
+    image_signal_values: list[_ImageSignalValues],
+    signal_ranks: _SignalRanks,
+    output_csv_path: str,
+) -> None:
+    file_names: list[str] = []
+    for values in image_signal_values:
+        file_names.append(values["file_name"])
+    frame_numbers = _compute_frame_numbers_by_lexicographic_order(
+        file_names
+    )
+    rows_with_rank: list[tuple[int, list[str]]] = []
+    for values in image_signal_values:
+        file_name = values["file_name"]
+        priority_rank, worst_signal_name = _find_worst_rank_and_signal(
+            file_name,
+            signal_ranks,
+        )
+        row = _build_csv_row(
+            values,
+            frame_numbers[file_name],
+            priority_rank,
+            worst_signal_name,
+        )
+        rows_with_rank.append((priority_rank, row))
+    rows_with_rank_sorted = sorted(rows_with_rank)
+    with open(output_csv_path, "w", newline="") as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(_CSV_HEADER_ROW)
+        for priority_rank, row in rows_with_rank_sorted:
+            csv_writer.writerow(row)
+
+
+def main() -> None:
+    configure_logging(logging.INFO, config.PIPELINE_LOG_PATH)
+    if len(sys.argv) != config.CLI_SCRIPT_ARGUMENT_COUNT:
+        _logger.error(_USAGE_MESSAGE)
+        sys.exit(1)
+    input_coco_path = sys.argv[1]
+    output_csv_path = sys.argv[2]
+    coco_dataset = load_coco_dataset(input_coco_path)
+    annotations_by_image_id = group_annotations_by_image_id(coco_dataset)
+    image_signal_values: list[_ImageSignalValues] = []
+    for image in coco_dataset["images"]:
+        annotations = annotations_by_image_id.get(image["id"], [])
+        signal_values = _compute_image_signal_values(
+            image["file_name"],
+            annotations,
+        )
+        image_signal_values.append(signal_values)
+    signal_ranks = _compute_all_signal_ranks(image_signal_values)
+    _write_priority_csv(image_signal_values, signal_ranks, output_csv_path)
+    _logger.info(f"Wrote review-priority ranking to {output_csv_path}")
+
+
+if __name__ == "__main__":
+    main()
