@@ -9,7 +9,14 @@ from pipeline import config
 
 
 class PedestrianSegmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, image_file_names: list[str]) -> None:
+    def __init__(
+        self,
+        images_directory: str,
+        masks_directory: str,
+        image_file_names: list[str],
+    ) -> None:
+        self.images_directory = images_directory
+        self.masks_directory = masks_directory
         self.image_file_names = image_file_names
 
     def __len__(self) -> int:
@@ -44,18 +51,12 @@ class PedestrianSegmentationDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         file_name = self.image_file_names[index]
-        image_path = os.path.join(
-            config.AUGMENTED_IMAGES_DIRECTORY,
-            file_name,
-        )
-        mask_path = os.path.join(
-            config.AUGMENTED_MASKS_DIRECTORY,
-            file_name,
-        )
+        image_path = os.path.join(self.images_directory, file_name)
+        mask_path = os.path.join(self.masks_directory, file_name)
         image_tensor = self._load_image_tensor(image_path)
         mask_tensor = self._load_mask_tensor(mask_path)
         return image_tensor, mask_tensor
 
 
-def list_augmented_file_names() -> list[str]:
-    return sorted(os.listdir(config.AUGMENTED_IMAGES_DIRECTORY))
+def list_file_names(directory: str) -> list[str]:
+    return sorted(os.listdir(directory))

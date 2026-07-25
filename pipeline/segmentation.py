@@ -36,7 +36,7 @@ class SamSegmentor:
         self,
         image: PIL.Image.Image,
         minmax_boxes: list[list[float]],
-    ) -> transformers.utils.ModelOutput:
+    ) -> tuple[numpy.ndarray, numpy.ndarray]:
         model_inputs = self.processor(
             image,
             input_boxes=[minmax_boxes],
@@ -45,7 +45,7 @@ class SamSegmentor:
         with torch.no_grad():
             model_outputs = self.model(
                 **model_inputs,
-                multimask_output=False,
+                multimask_output=True,
             )
         post_process = self.processor.image_processor.post_process_masks
         processed_masks = post_process(
@@ -53,7 +53,9 @@ class SamSegmentor:
             model_inputs["original_sizes"].cpu(),
             model_inputs["reshaped_input_sizes"].cpu(),
         )
-        return processed_masks[0]
+        candidate_masks = processed_masks[0].numpy()
+        iou_scores = model_outputs.iou_scores.cpu().numpy()[0]
+        return candidate_masks, iou_scores
 
     def segment_from_boxes(
         self,
@@ -63,11 +65,10 @@ class SamSegmentor:
         if len(bounding_boxes) == 0:
             return []
         minmax_boxes = self._bounding_boxes_to_minmax_lists(bounding_boxes)
-        single_image_masks = self._run_model(image, minmax_boxes)
-        single_image_masks = single_image_masks.squeeze(1).numpy()
+        candidate_masks, iou_scores = self._run_model(image, minmax_boxes)
         binary_masks: list[numpy.ndarray] = []
-        for mask_index in range(single_image_masks.shape[0]):
-            binary_masks.append(
-                single_image_masks[mask_index].astype(numpy.uint8)
-            )
+        for box_index in range(candidate_masks.shape[0]):
+            best_mask_index = int(numpy.argmax(iou_scores[box_index]))
+            best_mask = candidate_masks[box_index, best_mask_index]
+            binary_masks.append(best_mask.astype(numpy.uint8))
         return binary_masks
