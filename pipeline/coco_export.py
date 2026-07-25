@@ -9,7 +9,7 @@ from pipeline.coco_types import (
 )
 
 
-def compute_polygon_area(polygon: list[float]) -> float:
+def _compute_polygon_area(polygon: list[float]) -> float:
     signed_area_sum = 0.0
     number_of_points = len(polygon) // 2
     for point_index in range(number_of_points):
@@ -25,7 +25,7 @@ def compute_polygon_area(polygon: list[float]) -> float:
 def compute_total_polygons_area(polygons: list[list[float]]) -> float:
     total_area = 0.0
     for polygon in polygons:
-        total_area += compute_polygon_area(polygon)
+        total_area += _compute_polygon_area(polygon)
     return total_area
 
 

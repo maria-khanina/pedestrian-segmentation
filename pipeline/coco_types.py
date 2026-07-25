@@ -26,6 +26,11 @@ class CocoAnnotationEntry(TypedDict):
     iscrowd: int
 
 
+class CocoRleSegmentation(TypedDict):
+    counts: str
+    size: list[int]
+
+
 class CocoCategoryEntry(TypedDict):
     id: int
     name: str

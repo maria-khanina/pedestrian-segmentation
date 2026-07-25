@@ -4,7 +4,7 @@ import transformers
 
 from pipeline.coco_types import BoundingBox
 
-DetectionModelOutput = tuple[transformers.utils.ModelOutput, torch.Tensor]
+_DetectionModelOutput = tuple[transformers.utils.ModelOutput, torch.Tensor]
 
 
 class GroundingDinoDetector:
@@ -23,7 +23,7 @@ class GroundingDinoDetector:
         self,
         image: PIL.Image.Image,
         text_prompt: str,
-    ) -> DetectionModelOutput:
+    ) -> _DetectionModelOutput:
         model_inputs = self.processor(
             images=image,
             text=text_prompt,

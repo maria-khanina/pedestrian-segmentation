@@ -1,3 +1,4 @@
+import logging
 import os
 
 import cv2
@@ -5,16 +6,14 @@ import numpy
 import torch
 
 from pipeline import config
+from pipeline.device import select_device
+from pipeline.logging_setup import configure_logging
 from pipeline.unet_model import build_unet_model
 
-
-def select_device() -> str:
-    if torch.cuda.is_available():
-        return "cuda"
-    return "cpu"
+_logger = logging.getLogger(__name__)
 
 
-def load_model(device: str) -> torch.nn.Module:
+def _load_model(device: str) -> torch.nn.Module:
     model = build_unet_model()
     state_dict = torch.load(
         config.UNET_CHECKPOINT_PATH,
@@ -24,7 +23,7 @@ def load_model(device: str) -> torch.nn.Module:
     return model.to(device).eval()
 
 
-def preprocess_image(image_bgr: numpy.ndarray) -> torch.Tensor:
+def _preprocess_image(image_bgr: numpy.ndarray) -> torch.Tensor:
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     resized = cv2.resize(
         image_rgb,
@@ -41,7 +40,7 @@ def preprocess_image(image_bgr: numpy.ndarray) -> torch.Tensor:
     return torch.from_numpy(transposed).unsqueeze(0)
 
 
-def predict_binary_mask(
+def _predict_binary_mask(
     model: torch.nn.Module,
     image_tensor: torch.Tensor,
     device: str,
@@ -53,7 +52,7 @@ def predict_binary_mask(
     return predicted_mask.cpu().numpy().astype(numpy.uint8)
 
 
-def overlay_mask_on_image(
+def _overlay_mask_on_image(
     image_bgr: numpy.ndarray,
     predicted_mask: numpy.ndarray,
 ) -> numpy.ndarray:
@@ -73,7 +72,7 @@ def overlay_mask_on_image(
     )
 
 
-def visualize_single_image(
+def _visualize_single_image(
     model: torch.nn.Module,
     file_name: str,
     device: str,
@@ -83,25 +82,28 @@ def visualize_single_image(
         file_name,
     )
     image_bgr = cv2.imread(image_path)
-    image_tensor = preprocess_image(image_bgr)
-    predicted_mask = predict_binary_mask(model, image_tensor, device)
-    overlaid_image = overlay_mask_on_image(image_bgr, predicted_mask)
+    image_tensor = _preprocess_image(image_bgr)
+    predicted_mask = _predict_binary_mask(model, image_tensor, device)
+    overlaid_image = _overlay_mask_on_image(image_bgr, predicted_mask)
     output_path = os.path.join(config.PREDICTIONS_DIRECTORY, file_name)
     cv2.imwrite(output_path, overlaid_image)
 
 
 def main() -> None:
+    configure_logging(logging.INFO, config.PIPELINE_LOG_PATH)
     os.makedirs(config.PREDICTIONS_DIRECTORY, exist_ok=True)
     device = select_device()
-    print(f"Using device: {device}")
-    model = load_model(device)
+    _logger.info(f"Using device: {device}")
+    model = _load_model(device)
     file_names = sorted(
         os.listdir(config.AUGMENTED_TEST_IMAGES_DIRECTORY)
     )
     for file_name in file_names:
-        print(f"Predicting {file_name}")
-        visualize_single_image(model, file_name, device)
-    print(f"Saved prediction overlays to {config.PREDICTIONS_DIRECTORY}")
+        _logger.info(f"Predicting {file_name}")
+        _visualize_single_image(model, file_name, device)
+    _logger.info(
+        f"Saved prediction overlays to {config.PREDICTIONS_DIRECTORY}"
+    )
 
 
 if __name__ == "__main__":
