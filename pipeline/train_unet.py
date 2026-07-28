@@ -99,10 +99,38 @@ def _compute_iou_score(
     return numerator / denominator
 
 
+def _compute_soft_dice_loss(
+    predicted_probabilities: torch.Tensor,
+    ground_truth_mask: torch.Tensor,
+) -> torch.Tensor:
+    predicted_flat = predicted_probabilities.reshape(-1)
+    ground_truth_flat = ground_truth_mask.reshape(-1)
+    intersection = (predicted_flat * ground_truth_flat).sum()
+    union = predicted_flat.sum() + ground_truth_flat.sum()
+    numerator = 2.0 * intersection + _DICE_SCORE_SMOOTHING_TERM
+    denominator = union + _DICE_SCORE_SMOOTHING_TERM
+    dice_score = numerator / denominator
+    return 1.0 - dice_score
+
+
+def _compute_combined_loss(
+    predicted_logits: torch.Tensor,
+    ground_truth_mask: torch.Tensor,
+    bce_loss_function: torch.nn.Module,
+) -> torch.Tensor:
+    bce_loss = bce_loss_function(predicted_logits, ground_truth_mask)
+    predicted_probabilities = torch.sigmoid(predicted_logits)
+    dice_loss = _compute_soft_dice_loss(
+        predicted_probabilities,
+        ground_truth_mask,
+    )
+    return bce_loss + dice_loss
+
+
 def _train_one_epoch(
     model: torch.nn.Module,
     data_loader: torch.utils.data.DataLoader,
-    loss_function: torch.nn.Module,
+    bce_loss_function: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     device: str,
 ) -> float:
@@ -113,7 +141,11 @@ def _train_one_epoch(
         masks = masks.to(device)
         optimizer.zero_grad()
         predictions = model(images)
-        loss = loss_function(predictions, masks)
+        loss = _compute_combined_loss(
+            predictions,
+            masks,
+            bce_loss_function,
+        )
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
@@ -123,7 +155,7 @@ def _train_one_epoch(
 def _evaluate(
     model: torch.nn.Module,
     data_loader: torch.utils.data.DataLoader,
-    loss_function: torch.nn.Module,
+    bce_loss_function: torch.nn.Module,
     device: str,
 ) -> _EvaluationMetrics:
     model.eval()
@@ -135,7 +167,11 @@ def _evaluate(
             images = images.to(device)
             masks = masks.to(device)
             logits = model(images)
-            total_loss += loss_function(logits, masks).item()
+            total_loss += _compute_combined_loss(
+                logits,
+                masks,
+                bce_loss_function,
+            ).item()
             probabilities = torch.sigmoid(logits)
             predicted_binary_mask = (
                 probabilities > config.UNET_PREDICTION_THRESHOLD
@@ -160,7 +196,7 @@ def _run_training_loop(
     model: torch.nn.Module,
     training_loader: torch.utils.data.DataLoader,
     validation_loader: torch.utils.data.DataLoader,
-    loss_function: torch.nn.Module,
+    bce_loss_function: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     device: str,
 ) -> _BestTrainingResult:
@@ -174,12 +210,17 @@ def _run_training_loop(
         training_loss = _train_one_epoch(
             model,
             training_loader,
-            loss_function,
+            bce_loss_function,
             optimizer,
             device,
         )
         validation_loss, validation_dice_score, validation_iou_score = (
-            _evaluate(model, validation_loader, loss_function, device)
+            _evaluate(
+                model,
+                validation_loader,
+                bce_loss_function,
+                device,
+            )
         )
         _logger.info(
             f"Epoch {epoch_index + 1}: "
@@ -230,7 +271,7 @@ def main() -> None:
     )
 
     model = build_unet_model().to(device)
-    loss_function = torch.nn.BCEWithLogitsLoss()
+    bce_loss_function = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=config.UNET_LEARNING_RATE,
@@ -241,7 +282,7 @@ def main() -> None:
             model,
             training_loader,
             validation_loader,
-            loss_function,
+            bce_loss_function,
             optimizer,
             device,
         )
@@ -256,7 +297,7 @@ def main() -> None:
     test_loss, test_dice_score, test_iou_score = _evaluate(
         model,
         test_loader,
-        loss_function,
+        bce_loss_function,
         device,
     )
     _logger.info(

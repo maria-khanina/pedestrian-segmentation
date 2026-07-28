@@ -41,6 +41,21 @@ def _split_images_into_train_validation_test(
     return training_images, validation_images, test_images
 
 
+def _build_aspect_preserving_resize_steps() -> (
+    list[albumentations.BasicTransform]
+):
+    return [
+        albumentations.LongestMaxSize(
+            max_size=config.AUGMENTED_IMAGE_HEIGHT,
+        ),
+        albumentations.PadIfNeeded(
+            min_height=config.AUGMENTED_IMAGE_HEIGHT,
+            min_width=config.AUGMENTED_IMAGE_WIDTH,
+            position="center",
+        ),
+    ]
+
+
 def _build_augmentation_pipeline() -> albumentations.Compose:
     horizontal_flip_probability = (
         config.AUGMENTATION_HORIZONTAL_FLIP_PROBABILITY
@@ -65,45 +80,32 @@ def _build_augmentation_pipeline() -> albumentations.Compose:
         config
         .AUGMENTATION_GAUSSIAN_NOISE_STANDARD_DEVIATION_RANGE
     )
-    return albumentations.Compose(
-        [
-            albumentations.Resize(
-                height=config.AUGMENTED_IMAGE_HEIGHT,
-                width=config.AUGMENTED_IMAGE_WIDTH,
-            ),
-            albumentations.HorizontalFlip(
-                p=horizontal_flip_probability
-            ),
-            albumentations.Affine(
-                scale=affine_scale_range,
-                translate_percent=affine_translate_percent_range,
-                rotate=affine_rotate_degrees_range,
-                p=affine_probability,
-            ),
-            albumentations.RandomBrightnessContrast(
-                brightness_limit=brightness_limit,
-                contrast_limit=contrast_limit,
-                p=brightness_contrast_probability,
-            ),
-            albumentations.GaussNoise(
-                std_range=(
-                    gaussian_noise_standard_deviation_range
-                ),
-                p=gaussian_noise_probability,
-            ),
-        ]
+    randomized_steps = [
+        albumentations.HorizontalFlip(p=horizontal_flip_probability),
+        albumentations.Affine(
+            scale=affine_scale_range,
+            translate_percent=affine_translate_percent_range,
+            rotate=affine_rotate_degrees_range,
+            p=affine_probability,
+        ),
+        albumentations.RandomBrightnessContrast(
+            brightness_limit=brightness_limit,
+            contrast_limit=contrast_limit,
+            p=brightness_contrast_probability,
+        ),
+        albumentations.GaussNoise(
+            std_range=gaussian_noise_standard_deviation_range,
+            p=gaussian_noise_probability,
+        ),
+    ]
+    pipeline_steps = (
+        _build_aspect_preserving_resize_steps() + randomized_steps
     )
+    return albumentations.Compose(pipeline_steps)
 
 
 def _build_eval_pipeline() -> albumentations.Compose:
-    return albumentations.Compose(
-        [
-            albumentations.Resize(
-                height=config.AUGMENTED_IMAGE_HEIGHT,
-                width=config.AUGMENTED_IMAGE_WIDTH,
-            ),
-        ]
-    )
+    return albumentations.Compose(_build_aspect_preserving_resize_steps())
 
 
 def _load_image_as_rgb(image_path: str) -> numpy.ndarray:

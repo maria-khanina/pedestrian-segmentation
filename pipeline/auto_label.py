@@ -5,11 +5,11 @@ import PIL.Image
 
 from pipeline import config
 from pipeline.coco_export import CocoDatasetBuilder
-from pipeline.detection import GroundingDinoDetector
+from pipeline.detection import OpenVocabularyDetector
 from pipeline.device import select_device
 from pipeline.logging_setup import configure_logging
 from pipeline.polygon_mask_conversion import convert_mask_to_polygons
-from pipeline.segmentation import SamSegmentor
+from pipeline.segmentation import BoxPromptedSegmentor
 
 _IMAGE_FILE_EXTENSIONS = (".png", ".jpg", ".jpeg")
 
@@ -27,8 +27,8 @@ def _list_image_file_names(directory: str) -> list[str]:
 
 def _label_single_image(
     image_path: str,
-    detector: GroundingDinoDetector,
-    segmentor: SamSegmentor,
+    detector: OpenVocabularyDetector,
+    segmentor: BoxPromptedSegmentor,
     dataset_builder: CocoDatasetBuilder,
     file_name: str,
 ) -> None:
@@ -62,12 +62,12 @@ def main() -> None:
     configure_logging(logging.INFO, config.PIPELINE_LOG_PATH)
     device = select_device()
     _logger.info(f"Using device: {device}")
-    detector = GroundingDinoDetector(
-        config.GROUNDING_DINO_MODEL_IDENTIFIER,
+    detector = OpenVocabularyDetector(
+        config.DETECTOR_MODEL_IDENTIFIER,
         device,
     )
-    segmentor = SamSegmentor(
-        config.SAM_MODEL_IDENTIFIER,
+    segmentor = BoxPromptedSegmentor(
+        config.SEGMENTOR_MODEL_IDENTIFIER,
         device,
     )
     dataset_builder = CocoDatasetBuilder(

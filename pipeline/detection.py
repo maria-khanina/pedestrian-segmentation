@@ -7,7 +7,7 @@ from pipeline.coco_types import BoundingBox
 _DetectionModelOutput = tuple[transformers.utils.ModelOutput, torch.Tensor]
 
 
-class GroundingDinoDetector:
+class OpenVocabularyDetector:
     def __init__(self, model_identifier: str, device: str) -> None:
         self.device = device
         self.processor = transformers.AutoProcessor.from_pretrained(

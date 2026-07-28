@@ -32,9 +32,9 @@ USER appuser
 RUN python3 -c "\
 from pipeline import config; \
 import transformers; \
-transformers.AutoProcessor.from_pretrained(config.GROUNDING_DINO_MODEL_IDENTIFIER); \
-transformers.AutoModelForZeroShotObjectDetection.from_pretrained(config.GROUNDING_DINO_MODEL_IDENTIFIER); \
-transformers.SamProcessor.from_pretrained(config.SAM_MODEL_IDENTIFIER); \
-transformers.SamModel.from_pretrained(config.SAM_MODEL_IDENTIFIER)"
+transformers.AutoProcessor.from_pretrained(config.DETECTOR_MODEL_IDENTIFIER); \
+transformers.AutoModelForZeroShotObjectDetection.from_pretrained(config.DETECTOR_MODEL_IDENTIFIER); \
+transformers.SamProcessor.from_pretrained(config.SEGMENTOR_MODEL_IDENTIFIER); \
+transformers.SamModel.from_pretrained(config.SEGMENTOR_MODEL_IDENTIFIER)"
 
 CMD ["sleep", "infinity"]

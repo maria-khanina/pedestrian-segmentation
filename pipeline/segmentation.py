@@ -6,7 +6,7 @@ import transformers
 from pipeline.coco_types import BoundingBox
 
 
-class SamSegmentor:
+class BoxPromptedSegmentor:
 
     def __init__(self, model_identifier: str, device: str) -> None:
         self.device = device
