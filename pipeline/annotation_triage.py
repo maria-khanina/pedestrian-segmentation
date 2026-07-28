@@ -233,38 +233,40 @@ def _compute_minimum_solidity_scores(
 def _compute_all_signal_ranks(
     image_signal_values: list[_ImageSignalValues],
 ) -> _SignalRanks:
-    signal_ranks: _SignalRanks = []
-    signal_ranks.append((
-        _SIGNAL_NAME_ANNOTATION_COUNT,
-        _rank_by_suspicion_scores(
-            _compute_count_deviation_scores(image_signal_values)
+    return [
+        (
+            _SIGNAL_NAME_ANNOTATION_COUNT,
+            _rank_by_suspicion_scores(
+                _compute_count_deviation_scores(image_signal_values)
+            ),
         ),
-    ))
-    signal_ranks.append((
-        _SIGNAL_NAME_MINIMUM_AREA,
-        _rank_by_suspicion_scores(
-            _compute_minimum_area_scores(image_signal_values)
+        (
+            _SIGNAL_NAME_MINIMUM_AREA,
+            _rank_by_suspicion_scores(
+                _compute_minimum_area_scores(image_signal_values)
+            ),
         ),
-    ))
-    signal_ranks.append((
-        _SIGNAL_NAME_VERTEX_COUNT,
-        _rank_by_suspicion_scores(
-            _compute_vertex_count_extremity_scores(image_signal_values)
+        (
+            _SIGNAL_NAME_VERTEX_COUNT,
+            _rank_by_suspicion_scores(
+                _compute_vertex_count_extremity_scores(
+                    image_signal_values
+                )
+            ),
         ),
-    ))
-    signal_ranks.append((
-        _SIGNAL_NAME_ASPECT_RATIO,
-        _rank_by_suspicion_scores(
-            _compute_maximum_aspect_ratio_scores(image_signal_values)
+        (
+            _SIGNAL_NAME_ASPECT_RATIO,
+            _rank_by_suspicion_scores(
+                _compute_maximum_aspect_ratio_scores(image_signal_values)
+            ),
         ),
-    ))
-    signal_ranks.append((
-        _SIGNAL_NAME_SOLIDITY,
-        _rank_by_suspicion_scores(
-            _compute_minimum_solidity_scores(image_signal_values)
+        (
+            _SIGNAL_NAME_SOLIDITY,
+            _rank_by_suspicion_scores(
+                _compute_minimum_solidity_scores(image_signal_values)
+            ),
         ),
-    ))
-    return signal_ranks
+    ]
 
 
 def _find_worst_rank_and_signal(
@@ -284,7 +286,7 @@ def _find_worst_rank_and_signal(
     return best_rank_so_far, best_signal_name
 
 
-def _compute_frame_numbers_by_lexicographic_order(
+def _compute_cvat_frame_numbers(
     file_names: list[str],
 ) -> dict[str, int]:
     sorted_file_names = sorted(file_names)
@@ -314,30 +316,33 @@ def _build_csv_row(
     priority_rank: int,
     worst_signal_name: str,
 ) -> list[str]:
-    row: list[str] = []
-    row.append(values["file_name"])
-    row.append(str(frame_number))
-    row.append(str(priority_rank))
-    row.append(worst_signal_name)
-    row.append(str(values["annotation_count"]))
-    row.append(_format_optional_float_field(values["minimum_area"]))
-    row.append(_format_optional_int_field(values["maximum_vertex_count"]))
-    row.append(_format_optional_float_field(values["maximum_aspect_ratio"]))
-    row.append(_format_optional_float_field(values["minimum_solidity"]))
-    return row
+    return [
+        values["file_name"],
+        str(frame_number),
+        str(priority_rank),
+        worst_signal_name,
+        str(values["annotation_count"]),
+        _format_optional_float_field(values["minimum_area"]),
+        _format_optional_int_field(values["maximum_vertex_count"]),
+        _format_optional_float_field(values["maximum_aspect_ratio"]),
+        _format_optional_float_field(values["minimum_solidity"]),
+    ]
 
 
-def _write_priority_csv(
+def _extract_file_names(
     image_signal_values: list[_ImageSignalValues],
-    signal_ranks: _SignalRanks,
-    output_csv_path: str,
-) -> None:
+) -> list[str]:
     file_names: list[str] = []
     for values in image_signal_values:
         file_names.append(values["file_name"])
-    frame_numbers = _compute_frame_numbers_by_lexicographic_order(
-        file_names
-    )
+    return file_names
+
+
+def _build_ranked_rows(
+    image_signal_values: list[_ImageSignalValues],
+    signal_ranks: _SignalRanks,
+    frame_numbers: dict[str, int],
+) -> list[tuple[int, list[str]]]:
     rows_with_rank: list[tuple[int, list[str]]] = []
     for values in image_signal_values:
         file_name = values["file_name"]
@@ -352,12 +357,34 @@ def _write_priority_csv(
             worst_signal_name,
         )
         rows_with_rank.append((priority_rank, row))
-    rows_with_rank_sorted = sorted(rows_with_rank)
+    return rows_with_rank
+
+
+def _write_csv_rows(
+    rows_with_rank_sorted: list[tuple[int, list[str]]],
+    output_csv_path: str,
+) -> None:
     with open(output_csv_path, "w", newline="") as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(_CSV_HEADER_ROW)
-        for priority_rank, row in rows_with_rank_sorted:
+        for _, row in rows_with_rank_sorted:
             csv_writer.writerow(row)
+
+
+def _write_priority_csv(
+    image_signal_values: list[_ImageSignalValues],
+    signal_ranks: _SignalRanks,
+    output_csv_path: str,
+) -> None:
+    file_names = _extract_file_names(image_signal_values)
+    frame_numbers = _compute_cvat_frame_numbers(file_names)
+    rows_with_rank = _build_ranked_rows(
+        image_signal_values,
+        signal_ranks,
+        frame_numbers,
+    )
+    rows_with_rank_sorted = sorted(rows_with_rank)
+    _write_csv_rows(rows_with_rank_sorted, output_csv_path)
 
 
 def main() -> None:
