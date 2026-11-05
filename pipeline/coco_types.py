@@ -27,8 +27,18 @@ class CocoAnnotationEntry(TypedDict):
 
 
 class CocoRleSegmentation(TypedDict):
-    counts: str
+    counts: str | list[int]
     size: list[int]
+
+
+class CvatAnnotationEntry(TypedDict):
+    id: int
+    image_id: int
+    category_id: int
+    segmentation: list[list[float]] | CocoRleSegmentation
+    area: float
+    bbox: list[float]
+    iscrowd: int
 
 
 class CocoCategoryEntry(TypedDict):
@@ -40,6 +50,12 @@ class CocoCategoryEntry(TypedDict):
 class CocoDataset(TypedDict):
     images: list[CocoImageEntry]
     annotations: list[CocoAnnotationEntry]
+    categories: list[CocoCategoryEntry]
+
+
+class CvatDataset(TypedDict):
+    images: list[CocoImageEntry]
+    annotations: list[CvatAnnotationEntry]
     categories: list[CocoCategoryEntry]
 
 

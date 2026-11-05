@@ -3,7 +3,10 @@ import PIL.Image
 import torch
 import transformers
 
+from pipeline.array_types import ImageArray
 from pipeline.coco_types import BoundingBox
+
+_CandidateMasks = tuple[torch.Tensor, torch.Tensor]
 
 
 class BoxPromptedSegmentor:
@@ -20,23 +23,21 @@ class BoxPromptedSegmentor:
         self,
         bounding_boxes: list[BoundingBox],
     ) -> list[list[float]]:
-        minmax_boxes: list[list[float]] = []
-        for bounding_box in bounding_boxes:
-            minmax_boxes.append(
-                [
-                    bounding_box["x_min"],
-                    bounding_box["y_min"],
-                    bounding_box["x_max"],
-                    bounding_box["y_max"],
-                ]
-            )
-        return minmax_boxes
+        return [
+            [
+                bounding_box["x_min"],
+                bounding_box["y_min"],
+                bounding_box["x_max"],
+                bounding_box["y_max"],
+            ]
+            for bounding_box in bounding_boxes
+        ]
 
     def _run_model(
         self,
         image: PIL.Image.Image,
         minmax_boxes: list[list[float]],
-    ) -> tuple[numpy.ndarray, numpy.ndarray]:
+    ) -> _CandidateMasks:
         model_inputs = self.processor(
             image,
             input_boxes=[minmax_boxes],
@@ -47,28 +48,24 @@ class BoxPromptedSegmentor:
                 **model_inputs,
                 multimask_output=True,
             )
-        post_process = self.processor.image_processor.post_process_masks
-        processed_masks = post_process(
+        processed_masks = self.processor.post_process_masks(
             model_outputs.pred_masks.cpu(),
             model_inputs["original_sizes"].cpu(),
             model_inputs["reshaped_input_sizes"].cpu(),
         )
-        candidate_masks = processed_masks[0].numpy()
-        iou_scores = model_outputs.iou_scores.cpu().numpy()[0]
-        return candidate_masks, iou_scores
+        return processed_masks[0], model_outputs.iou_scores.cpu()[0]
 
     def segment_from_boxes(
         self,
         image: PIL.Image.Image,
         bounding_boxes: list[BoundingBox],
-    ) -> list[numpy.ndarray]:
+    ) -> list[ImageArray]:
         if len(bounding_boxes) == 0:
             return []
         minmax_boxes = self._bounding_boxes_to_minmax_lists(bounding_boxes)
         candidate_masks, iou_scores = self._run_model(image, minmax_boxes)
-        binary_masks: list[numpy.ndarray] = []
-        for box_index in range(candidate_masks.shape[0]):
-            best_mask_index = int(numpy.argmax(iou_scores[box_index]))
-            best_mask = candidate_masks[box_index, best_mask_index]
-            binary_masks.append(best_mask.astype(numpy.uint8))
-        return binary_masks
+        best_mask_indices = iou_scores.argmax(dim=1)
+        return [
+            numpy.asarray(box_masks[best_index], dtype=numpy.uint8)
+            for box_masks, best_index in zip(candidate_masks, best_mask_indices)
+        ]

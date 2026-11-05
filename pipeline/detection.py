@@ -1,6 +1,7 @@
 import PIL.Image
 import torch
 import transformers
+import transformers.utils
 
 from pipeline.coco_types import BoundingBox
 
@@ -13,9 +14,7 @@ class OpenVocabularyDetector:
         self.processor = transformers.AutoProcessor.from_pretrained(
             model_identifier
         )
-        model_class = (
-            transformers.AutoModelForZeroShotObjectDetection
-        )
+        model_class = transformers.AutoModelForZeroShotObjectDetection
         model = model_class.from_pretrained(model_identifier)
         self.model = model.to(device).eval()
 
@@ -38,11 +37,12 @@ class OpenVocabularyDetector:
         raw_box: torch.Tensor,
         confidence: float,
     ) -> BoundingBox:
+        x_min, y_min, x_max, y_max = (float(value) for value in raw_box)
         return BoundingBox(
-            x_min=float(raw_box[0]),
-            y_min=float(raw_box[1]),
-            x_max=float(raw_box[2]),
-            y_max=float(raw_box[3]),
+            x_min=x_min,
+            y_min=y_min,
+            x_max=x_max,
+            y_max=y_max,
             confidence=confidence,
         )
 
@@ -54,11 +54,8 @@ class OpenVocabularyDetector:
         text_threshold: float,
     ) -> list[BoundingBox]:
         model_outputs, input_ids = self._run_model(image, text_prompt)
-        image_height_width = [(image.height, image.width)]
-        post_process = (
-            self.processor.post_process_grounded_object_detection
-        )
-        processed_results = post_process(
+        image_height_width: list[tuple[int, int]] = [(image.height, image.width)]
+        processed_results = self.processor.post_process_grounded_object_detection(
             model_outputs,
             input_ids,
             threshold=box_threshold,
@@ -66,14 +63,10 @@ class OpenVocabularyDetector:
             target_sizes=image_height_width,
         )
         single_image_result = processed_results[0]
-        bounding_boxes: list[BoundingBox] = []
-        detected_boxes = single_image_result["boxes"]
-        detected_scores = single_image_result["scores"]
-        for detection_index in range(detected_boxes.shape[0]):
-            bounding_boxes.append(
-                self._build_bounding_box(
-                    detected_boxes[detection_index],
-                    float(detected_scores[detection_index]),
-                )
+        return [
+            self._build_bounding_box(raw_box, float(score))
+            for raw_box, score in zip(
+                single_image_result["boxes"],
+                single_image_result["scores"],
             )
-        return bounding_boxes
+        ]

@@ -3,7 +3,7 @@ import os
 
 import PIL.Image
 
-from pipeline import config
+from pipeline import segmentation_settings as settings
 from pipeline.coco_export import CocoDatasetBuilder
 from pipeline.detection import OpenVocabularyDetector
 from pipeline.device import select_device
@@ -17,12 +17,11 @@ _logger = logging.getLogger(__name__)
 
 
 def _list_image_file_names(directory: str) -> list[str]:
-    all_entries = sorted(os.listdir(directory))
-    image_file_names: list[str] = []
-    for entry in all_entries:
-        if entry.lower().endswith(_IMAGE_FILE_EXTENSIONS):
-            image_file_names.append(entry)
-    return image_file_names
+    return [
+        entry
+        for entry in sorted(os.listdir(directory))
+        if entry.lower().endswith(_IMAGE_FILE_EXTENSIONS)
+    ]
 
 
 def _label_single_image(
@@ -35,49 +34,50 @@ def _label_single_image(
     image = PIL.Image.open(image_path).convert("RGB")
     bounding_boxes = detector.detect_boxes(
         image,
-        config.DETECTION_TEXT_PROMPT,
-        config.DETECTION_BOX_THRESHOLD,
-        config.DETECTION_TEXT_THRESHOLD,
+        settings.DETECTION_TEXT_PROMPT,
+        settings.DETECTION_BOX_THRESHOLD,
+        settings.DETECTION_TEXT_THRESHOLD,
     )
     image_id = dataset_builder.add_image(
         file_name,
         image.width,
         image.height,
     )
-    if len(bounding_boxes) == 0:
-        return
-    binary_masks = segmentor.segment_from_boxes(image, bounding_boxes)
-    for binary_mask in binary_masks:
+    for binary_mask in segmentor.segment_from_boxes(image, bounding_boxes):
         polygons = convert_mask_to_polygons(
             binary_mask,
-            config.MINIMUM_CONTOUR_AREA_IN_PIXELS,
-            config.POLYGON_APPROXIMATION_EPSILON_FACTOR,
+            settings.MINIMUM_CONTOUR_AREA_IN_PIXELS,
+            settings.POLYGON_APPROXIMATION_EPSILON_FACTOR,
         )
-        if len(polygons) == 0:
-            continue
-        dataset_builder.add_annotation(image_id, polygons)
+        if polygons:
+            dataset_builder.add_annotation(image_id, polygons)
 
 
-def main() -> None:
-    configure_logging(logging.INFO, config.PIPELINE_LOG_PATH)
+def _load_models() -> tuple[OpenVocabularyDetector, BoxPromptedSegmentor]:
     device = select_device()
     _logger.info(f"Using device: {device}")
     detector = OpenVocabularyDetector(
-        config.DETECTOR_MODEL_IDENTIFIER,
+        settings.DETECTOR_MODEL_IDENTIFIER,
         device,
     )
     segmentor = BoxPromptedSegmentor(
-        config.SEGMENTOR_MODEL_IDENTIFIER,
+        settings.SEGMENTOR_MODEL_IDENTIFIER,
         device,
     )
+    return detector, segmentor
+
+
+def main() -> None:
+    configure_logging(logging.INFO, settings.PIPELINE_LOG_PATH)
+    detector, segmentor = _load_models()
     dataset_builder = CocoDatasetBuilder(
-        config.PEDESTRIAN_CATEGORY_ID,
-        config.PEDESTRIAN_CATEGORY_NAME,
-        config.PEDESTRIAN_SUPERCATEGORY_NAME,
+        settings.PEDESTRIAN_CATEGORY_ID,
+        settings.PEDESTRIAN_CATEGORY_NAME,
+        settings.PEDESTRIAN_SUPERCATEGORY_NAME,
     )
-    image_file_names = _list_image_file_names(config.RAW_IMAGES_DIRECTORY)
+    image_file_names = _list_image_file_names(settings.RAW_IMAGES_DIRECTORY)
     for file_name in image_file_names:
-        image_path = os.path.join(config.RAW_IMAGES_DIRECTORY, file_name)
+        image_path = os.path.join(settings.RAW_IMAGES_DIRECTORY, file_name)
         _logger.info(f"Labeling {file_name}")
         _label_single_image(
             image_path,
@@ -86,9 +86,9 @@ def main() -> None:
             dataset_builder,
             file_name,
         )
-    dataset_builder.save_to_file(config.AUTO_LABELS_COCO_PATH)
+    dataset_builder.save_to_file(settings.AUTO_LABELS_COCO_PATH)
     _logger.info(
-        f"Saved COCO annotations to {config.AUTO_LABELS_COCO_PATH}"
+        f"Saved COCO annotations to {settings.AUTO_LABELS_COCO_PATH}"
     )
 
 
