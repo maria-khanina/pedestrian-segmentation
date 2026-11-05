@@ -35,10 +35,8 @@ def compute_bounding_box_from_polygons(
     all_x_coordinates: list[float] = []
     all_y_coordinates: list[float] = []
     for polygon in polygons:
-        number_of_points = len(polygon) // 2
-        for point_index in range(number_of_points):
-            all_x_coordinates.append(polygon[point_index * 2])
-            all_y_coordinates.append(polygon[point_index * 2 + 1])
+        all_x_coordinates.extend(polygon[0::2])
+        all_y_coordinates.extend(polygon[1::2])
     minimum_x = min(all_x_coordinates)
     minimum_y = min(all_y_coordinates)
     maximum_x = max(all_x_coordinates)

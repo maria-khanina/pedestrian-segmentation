@@ -5,7 +5,7 @@ import sys
 import matplotlib.figure
 import matplotlib.pyplot
 
-from pipeline import config
+from pipeline import segmentation_settings as settings
 from pipeline.logging_setup import configure_logging
 
 _logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ _USAGE_MESSAGE = (
     "<input_log_path> <output_image_path>"
 )
 
-_RUN_START_MARKER = "Using device:"
+_RUN_START_MARKER = "Epoch 1:"
 
 _EPOCH_LINE_PATTERN = re.compile(
     r"Epoch (\d+): training loss=([\d.]+), validation loss=([\d.]+)"
@@ -30,26 +30,22 @@ def _read_log_lines(log_path: str) -> list[str]:
 
 
 def _extract_latest_run_lines(log_lines: list[str]) -> list[str]:
-    latest_run_start_index = 0
-    line_index = 0
-    while line_index < len(log_lines):
-        if _RUN_START_MARKER in log_lines[line_index]:
-            latest_run_start_index = line_index
-        line_index += 1
-    return log_lines[latest_run_start_index:]
+    run_start_indices: list[int] = [
+        line_index
+        for line_index, line in enumerate(log_lines)
+        if _RUN_START_MARKER in line
+    ]
+    return log_lines[run_start_indices[-1]:] if run_start_indices else log_lines
 
 
 def _parse_epoch_losses(log_lines: list[str]) -> _EpochLosses:
-    epoch_numbers: list[int] = []
-    training_losses: list[float] = []
-    validation_losses: list[float] = []
-    for line in log_lines:
-        match = _EPOCH_LINE_PATTERN.search(line)
-        if match is None:
-            continue
-        epoch_numbers.append(int(match.group(1)))
-        training_losses.append(float(match.group(2)))
-        validation_losses.append(float(match.group(3)))
+    matches = (_EPOCH_LINE_PATTERN.search(line) for line in log_lines)
+    rows: list[tuple[str, ...]] = [
+        match.groups() for match in matches if match is not None
+    ]
+    epoch_numbers: list[int] = [int(row[0]) for row in rows]
+    training_losses: list[float] = [float(row[1]) for row in rows]
+    validation_losses: list[float] = [float(row[2]) for row in rows]
     return epoch_numbers, training_losses, validation_losses
 
 
@@ -58,7 +54,9 @@ def _build_loss_curve_figure(
     training_losses: list[float],
     validation_losses: list[float],
 ) -> matplotlib.figure.Figure:
-    figure, axes = matplotlib.pyplot.subplots(figsize=(8, 5))
+    figure, axes = matplotlib.pyplot.subplots(
+        figsize=settings.LOSS_PLOT_SIZE_IN_INCHES,
+    )
     axes.plot(
         epoch_numbers,
         training_losses,
@@ -80,14 +78,12 @@ def _build_loss_curve_figure(
 
 
 def main() -> None:
-    configure_logging(logging.INFO, config.PIPELINE_LOG_PATH)
-    if len(sys.argv) != config.CLI_SCRIPT_ARGUMENT_COUNT:
+    configure_logging(logging.INFO, settings.PIPELINE_LOG_PATH)
+    if len(sys.argv) != settings.CLI_SCRIPT_ARGUMENT_COUNT:
         _logger.error(_USAGE_MESSAGE)
         sys.exit(1)
-    input_log_path = sys.argv[1]
-    output_image_path = sys.argv[2]
-    log_lines = _read_log_lines(input_log_path)
-    latest_run_lines = _extract_latest_run_lines(log_lines)
+    input_log_path, output_image_path = sys.argv[1:]
+    latest_run_lines = _extract_latest_run_lines(_read_log_lines(input_log_path))
     epoch_numbers, training_losses, validation_losses = (
         _parse_epoch_losses(latest_run_lines)
     )

@@ -30,11 +30,11 @@ ENV PYTHONUNBUFFERED=1
 USER appuser
 
 RUN python3 -c "\
-from pipeline import config; \
+from pipeline import segmentation_settings as settings; \
 import transformers; \
-transformers.AutoProcessor.from_pretrained(config.DETECTOR_MODEL_IDENTIFIER); \
-transformers.AutoModelForZeroShotObjectDetection.from_pretrained(config.DETECTOR_MODEL_IDENTIFIER); \
-transformers.SamProcessor.from_pretrained(config.SEGMENTOR_MODEL_IDENTIFIER); \
-transformers.SamModel.from_pretrained(config.SEGMENTOR_MODEL_IDENTIFIER)"
+transformers.AutoProcessor.from_pretrained(settings.DETECTOR_MODEL_IDENTIFIER); \
+transformers.AutoModelForZeroShotObjectDetection.from_pretrained(settings.DETECTOR_MODEL_IDENTIFIER); \
+transformers.SamProcessor.from_pretrained(settings.SEGMENTOR_MODEL_IDENTIFIER); \
+transformers.SamModel.from_pretrained(settings.SEGMENTOR_MODEL_IDENTIFIER)"
 
 CMD ["sleep", "infinity"]

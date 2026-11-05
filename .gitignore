@@ -1,0 +1,8 @@
+__pycache__/
+.venv/
+data/raw/
+data/augmented/
+data/checkpoints/
+data/predictions/
+data/logs/
+data/reviewed/images/
